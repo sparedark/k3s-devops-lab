@@ -70,8 +70,7 @@ creates the registry pull/push secrets, lets Traefik route to ExternalName servi
 grants Jenkins least-privilege RBAC to deploy into your namespace:
 
 ```powershell
-vagrant ssh
-bash /vagrant/scripts/config.sh   # prompts for namespace, Nexus domain, Nexus password
+vagrant ssh -c "bash /vagrant/scripts/config.sh"
 ```
 
 Full walkthrough and the pipeline it unlocks: **[Bootstrap CI/CD](docs/bootstrap.md)**.

@@ -17,10 +17,20 @@ if ! grep -q "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml" ~/.bashrc; then
   echo 'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml' >> ~/.bashrc
 fi
 
+read -p "Enter Helm Repository Alias [default: xeze]: " INPUT_HELM_ALIAS
+HELM_REPO_ALIAS="${INPUT_HELM_ALIAS:-xeze}"
+
+read -p "Enter Nexus Helm Repository [default: helm]: " INPUT_HELM_REPO
+NEXUS_HELM_REPO="${INPUT_HELM_REPO:-helm}"
+
 echo "--> Adding Nexus Helm repository..."
-helm repo add custom-nexus https://${NEXUS_DOMAIN}/repository/helm/ \
+
+helm repo add "${HELM_REPO_ALIAS}" \
+  "https://${NEXUS_DOMAIN}/repository/${NEXUS_HELM_REPO}/" \
   --username admin \
   --password "$NEXUS_PASSWORD"
+
+helm repo update
 
 echo "--> Ensuring namespace '$TARGET_NAMESPACE' exists..."
 kubectl get namespace "$TARGET_NAMESPACE" >/dev/null 2>&1 || kubectl create namespace "$TARGET_NAMESPACE"
