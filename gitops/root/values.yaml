@@ -1,0 +1,40 @@
+# ┌─────────────────────────────────────────────────────────────────────────┐
+# │ THE config file. Edit this, `git push`, then `vagrant up`.               │
+# │ Public repo => ArgoCD reads this directly, no token needed.              │
+# └─────────────────────────────────────────────────────────────────────────┘
+
+# Your Cloudflare domain. Tools are exposed at <tool>.<domain>.
+domain: your domain
+
+# This repo (ArgoCD pulls manifests from here).
+repoURL: your github repo 
+branch: main
+
+# Tool toggles:  true = ArgoCD installs it,  false = ArgoCD prunes it.
+# (Also drives VM RAM/CPU sizing in the Vagrantfile.)
+monitoring:
+  enabled: false      # Prometheus + Grafana
+loki:
+  enabled: false      # Loki logs (shown in Grafana)
+jenkins:
+  enabled: false     # heavy: +2GB
+nexus:
+  enabled: false     # heavy: +2GB
+harbor:
+  enabled: false    # container registry at registry.<domain> — heavy: +2GB
+keda:
+  enabled: false     # event-driven autoscaler + a self-contained Cron demo — light: +512MB
+kedaHttp:
+  enabled: false     # KEDA HTTP Add-on: scale HTTP apps to zero (Cloud Run style).
+                    # REQUIRES keda.enabled=true. Light: +256MB. See docs/keda.md.
+knative:
+  enabled: false    # Knative Serving + Kourier: self-hosted Cloud Run (request-driven
+                    # scale-to-zero). Heavy: +1GB (~8 pods). Live toggle. See docs/knative.md.
+
+# Networking CNI. PROVISION-TIME flag — unlike every tool above (which ArgoCD
+# reconciles live), this is read by the Vagrantfile + Ansible at FIRST BOOT.
+# true  = Cilium (eBPF) CNI + Hubble replace Flannel + kube-proxy entirely.
+# false = stock K3s (Flannel + kube-proxy).
+# You CANNOT hot-swap a CNI: changing this needs `vagrant destroy && vagrant up`.
+cilium:
+  enabled: false     # eBPF datapath + Hubble observability — +768MB

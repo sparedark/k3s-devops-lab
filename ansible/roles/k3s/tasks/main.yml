@@ -1,0 +1,54 @@
+---
+# Install k3s (single node, keeps the bundled Traefik ingress + servicelb).
+# When cilium_enabled, we tell k3s NOT to install its default Flannel CNI,
+# network-policy controller, or kube-proxy — the `cilium` role installs Cilium
+# (eBPF) to fill all three roles. The node stays NotReady until it does.
+- name: Build the k3s install flags (extra flags only when Cilium owns the CNI)
+  ansible.builtin.set_fact:
+    k3s_install_exec: >-
+      --write-kubeconfig-mode 644
+      {{ '--flannel-backend=none --disable-network-policy --disable-kube-proxy'
+         if (cilium_enabled | default(false) | bool) else '' }}
+
+- name: Check whether k3s is already installed
+  ansible.builtin.stat:
+    path: /usr/local/bin/k3s
+  register: k3s_bin
+
+- name: Download k3s installer (retry on transient network failures)
+  ansible.builtin.get_url:
+    url: https://get.k3s.io
+    dest: /tmp/k3s-install.sh
+    mode: "0755"
+    timeout: 30
+  when: not k3s_bin.stat.exists
+  register: k3s_dl
+  until: k3s_dl is succeeded
+  retries: 5
+  delay: 10
+
+- name: Install k3s (retry — the installer also pulls the binary over the network)
+  ansible.builtin.command: /tmp/k3s-install.sh
+  environment:
+    INSTALL_K3S_EXEC: "{{ k3s_install_exec }}"
+  when: not k3s_bin.stat.exists
+  register: k3s_install
+  until: k3s_install is succeeded
+  retries: 3
+  delay: 10
+  changed_when: true
+
+# With Cilium, the node CANNOT be Ready yet — there is no CNI until the `cilium`
+# role runs next. That role does the Ready-wait after it installs Cilium.
+- name: Wait for the node to become Ready (stock Flannel path only)
+  ansible.builtin.shell: |
+    {{ kubectl }} wait --for=condition=Ready node --all --timeout=180s
+  changed_when: false
+  when: not (cilium_enabled | default(false) | bool)
+
+- name: Provide a convenient kubectl symlink
+  ansible.builtin.file:
+    src: /usr/local/bin/k3s
+    dest: /usr/local/bin/kubectl
+    state: link
+    force: true

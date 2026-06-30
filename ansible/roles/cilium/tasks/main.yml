@@ -1,0 +1,69 @@
+---
+# Install Cilium (eBPF CNI) + Hubble, replacing the Flannel + kube-proxy that the
+# `k3s` role deliberately skipped (--flannel-backend=none --disable-kube-proxy).
+#
+# Cilium's agent runs with host networking, so it comes up on the NotReady node
+# k3s leaves behind, installs the CNI, and only THEN does the node go Ready.
+#
+# NOTE: this assumes k3s was installed THIS run with the Cilium flags. Flipping
+# cilium.enabled on an already-provisioned VM won't re-apply those flags, so a
+# clean `vagrant destroy && vagrant up` is required to switch CNIs.
+- name: Cilium + Hubble (skipped entirely unless cilium.enabled)
+  when: cilium_enabled | default(false) | bool
+  block:
+    - name: Install helm (idempotent — skipped if the binary already exists)
+      ansible.builtin.shell: |
+        curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+      args:
+        creates: /usr/local/bin/helm
+      register: helm_install
+      until: helm_install is succeeded
+      retries: 5
+      delay: 10
+
+    - name: Add (or refresh) the Cilium helm repo
+      ansible.builtin.command: helm repo add cilium https://helm.cilium.io/ --force-update
+      changed_when: false
+
+    - name: Update helm repos
+      ansible.builtin.command: helm repo update cilium
+      changed_when: false
+
+    # k8sServiceHost/Port are REQUIRED with kube-proxy replacement: with no
+    # kube-proxy there is no in-cluster `kubernetes` ClusterIP yet, so Cilium
+    # needs an explicit API-server endpoint to bootstrap. 127.0.0.1:6443 is
+    # correct on this single node (API server is local) and avoids the multi-NIC
+    # ambiguity of the Vagrant box (NAT eth0 + private eth1).
+    # cni.exclusive=false is the K3s-specific must-have (don't wipe other CNI conf).
+    - name: Install/upgrade Cilium with kube-proxy replacement + Hubble
+      ansible.builtin.command: >
+        helm upgrade --install cilium cilium/cilium
+        --version {{ cilium_version }}
+        --namespace kube-system
+        --set kubeProxyReplacement=true
+        --set k8sServiceHost=127.0.0.1
+        --set k8sServicePort=6443
+        --set ipam.mode=kubernetes
+        --set cni.exclusive=false
+        --set socketLB.enabled=true
+        --set operator.replicas=1
+        --set hubble.enabled=true
+        --set hubble.relay.enabled=true
+        --set hubble.ui.enabled=true
+      environment:
+        KUBECONFIG: "{{ kubeconfig }}"
+      register: cilium_install
+      until: cilium_install is succeeded
+      retries: 3
+      delay: 15
+      changed_when: "'STATUS: deployed' in cilium_install.stdout"
+
+    - name: Wait for the Cilium DaemonSet to roll out
+      ansible.builtin.command: >
+        {{ kubectl }} -n kube-system rollout status ds/cilium --timeout=300s
+      changed_when: false
+
+    - name: Wait for the node to become Ready (the CNI now exists)
+      ansible.builtin.command: >
+        {{ kubectl }} wait --for=condition=Ready node --all --timeout=300s
+      changed_when: false

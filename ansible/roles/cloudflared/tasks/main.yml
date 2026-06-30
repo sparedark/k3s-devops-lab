@@ -1,0 +1,161 @@
+---
+# Create a locally-managed Cloudflare Tunnel + wildcard DNS, then run cloudflared
+# in-cluster forwarding all traffic to Traefik (which routes by Host header).
+
+- name: Ensure cloudflared namespace exists
+  ansible.builtin.shell: |
+    {{ kubectl }} create namespace cloudflared \
+      --dry-run=client -o yaml | {{ kubectl }} apply -f -
+  changed_when: false
+
+- name: Look up the Cloudflare zone id for the domain
+  ansible.builtin.uri:
+    url: "https://api.cloudflare.com/client/v4/zones?name={{ domain }}"
+    headers:
+      Authorization: "Bearer {{ cf_api_token }}"
+    return_content: true
+  register: cf_zone
+  no_log: true
+
+- name: Fail if the domain is not in this Cloudflare account
+  ansible.builtin.assert:
+    that: cf_zone.json.result | length > 0
+    fail_msg: "Domain {{ domain }} not found in Cloudflare (check DOMAIN / token scope)."
+
+- name: Set zone id fact
+  ansible.builtin.set_fact:
+    cf_zone_id: "{{ cf_zone.json.result[0].id }}"
+
+# ── Decide whether we must create a fresh tunnel ──────────────────────────────
+- name: Check whether tunnel credentials already exist in the cluster
+  ansible.builtin.shell: "{{ kubectl }} -n cloudflared get secret cloudflared-creds"
+  register: creds_check
+  failed_when: false
+  changed_when: false
+
+- name: Look up an existing tunnel by name
+  ansible.builtin.uri:
+    url: "https://api.cloudflare.com/client/v4/accounts/{{ cf_account_id }}/cfd_tunnel?name={{ tunnel_name }}&is_deleted=false"
+    headers:
+      Authorization: "Bearer {{ cf_api_token }}"
+  register: cf_tunnel_list
+  no_log: true
+
+- name: Set create-needed / existing-id facts
+  ansible.builtin.set_fact:
+    creds_exist: "{{ creds_check.rc == 0 }}"
+    existing_tunnel_id: "{{ (cf_tunnel_list.json.result[0].id) if (cf_tunnel_list.json.result | length > 0) else '' }}"
+
+# If the cluster has no creds but a same-named tunnel exists, it's an orphan from a
+# previous run whose secret we can't recover — delete it so we can recreate cleanly.
+- name: Delete orphaned tunnel (no in-cluster creds but tunnel exists)
+  ansible.builtin.uri:
+    url: "https://api.cloudflare.com/client/v4/accounts/{{ cf_account_id }}/cfd_tunnel/{{ existing_tunnel_id }}?cleanup=true"
+    method: DELETE
+    headers:
+      Authorization: "Bearer {{ cf_api_token }}"
+  when: not creds_exist and existing_tunnel_id | length > 0
+  no_log: true
+
+- name: Generate a tunnel secret
+  ansible.builtin.command: openssl rand -base64 32
+  register: tunnel_secret_cmd
+  when: not creds_exist
+  changed_when: false
+  no_log: true
+
+- name: Create a new locally-managed tunnel
+  ansible.builtin.uri:
+    url: "https://api.cloudflare.com/client/v4/accounts/{{ cf_account_id }}/cfd_tunnel"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ cf_api_token }}"
+    body_format: json
+    body:
+      name: "{{ tunnel_name }}"
+      tunnel_secret: "{{ tunnel_secret_cmd.stdout }}"
+      config_src: local
+    status_code: [200, 201]
+  register: cf_tunnel_new
+  when: not creds_exist
+  no_log: true
+
+- name: Resolve the effective tunnel id
+  ansible.builtin.set_fact:
+    tunnel_id: "{{ cf_tunnel_new.json.result.id if not creds_exist else existing_tunnel_id }}"
+
+- name: Write tunnel credentials file (only when freshly created)
+  ansible.builtin.copy:
+    dest: /tmp/credentials.json
+    mode: "0600"
+    content: |
+      {"AccountTag":"{{ cf_account_id }}","TunnelID":"{{ tunnel_id }}","TunnelSecret":"{{ tunnel_secret_cmd.stdout }}"}
+  when: not creds_exist
+  no_log: true
+
+- name: Store credentials as a k8s secret
+  ansible.builtin.shell: |
+    {{ kubectl }} -n cloudflared create secret generic cloudflared-creds \
+      --from-file=credentials.json=/tmp/credentials.json \
+      --dry-run=client -o yaml | {{ kubectl }} apply -f -
+    rm -f /tmp/credentials.json
+  when: not creds_exist
+  changed_when: true
+  no_log: true
+
+# ── Wildcard DNS: *.domain -> <tunnel>.cfargotunnel.com (proxied) ─────────────
+- name: Check for an existing wildcard DNS record
+  ansible.builtin.uri:
+    url: "https://api.cloudflare.com/client/v4/zones/{{ cf_zone_id }}/dns_records?name=*.{{ domain }}"
+    headers:
+      Authorization: "Bearer {{ cf_api_token }}"
+  register: cf_dns
+  no_log: true
+
+- name: Create wildcard DNS record
+  ansible.builtin.uri:
+    url: "https://api.cloudflare.com/client/v4/zones/{{ cf_zone_id }}/dns_records"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ cf_api_token }}"
+    body_format: json
+    body:
+      type: CNAME
+      name: "*.{{ domain }}"
+      content: "{{ tunnel_id }}.cfargotunnel.com"
+      proxied: true
+    status_code: [200, 201]
+  when: cf_dns.json.result | length == 0
+  no_log: true
+
+- name: Update wildcard DNS record (if it already exists)
+  ansible.builtin.uri:
+    url: "https://api.cloudflare.com/client/v4/zones/{{ cf_zone_id }}/dns_records/{{ cf_dns.json.result[0].id }}"
+    method: PUT
+    headers:
+      Authorization: "Bearer {{ cf_api_token }}"
+    body_format: json
+    body:
+      type: CNAME
+      name: "*.{{ domain }}"
+      content: "{{ tunnel_id }}.cfargotunnel.com"
+      proxied: true
+  when: cf_dns.json.result | length > 0
+  no_log: true
+
+# ── Deploy cloudflared into the cluster ───────────────────────────────────────
+- name: Render cloudflared manifests
+  ansible.builtin.template:
+    src: cloudflared.yaml.j2
+    dest: /tmp/cloudflared.yaml
+    mode: "0644"
+
+- name: Apply cloudflared deployment
+  ansible.builtin.shell: "{{ kubectl }} apply -f /tmp/cloudflared.yaml"
+  register: cfd_apply
+  changed_when: "'created' in cfd_apply.stdout or 'configured' in cfd_apply.stdout"
+
+- name: Wait for cloudflared to roll out
+  ansible.builtin.shell: |
+    {{ kubectl }} -n cloudflared rollout status deploy/cloudflared --timeout=120s
+  changed_when: false

@@ -1,0 +1,4 @@
+---
+# Cilium Helm chart version. Pinned — bump manually after checking release notes.
+# 1.19.5 is the current stable line (June 2026).
+cilium_version: "1.19.5"

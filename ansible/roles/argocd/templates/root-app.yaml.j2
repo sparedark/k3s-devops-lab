@@ -1,0 +1,27 @@
+# App-of-apps root. Renders the Helm chart at gitops/root, whose templates emit
+# one child Application per enabled tool (driven by gitops/root/values.yaml).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: "{{ git_repo }}"
+    targetRevision: "{{ git_branch }}"
+    path: gitops/root
+    helm:
+      valueFiles:
+        - values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

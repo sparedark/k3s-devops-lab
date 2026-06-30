@@ -1,0 +1,21 @@
+# A plain Deployment — your app's pods.
+# `app: it-tools` is the label everything else (Service, Ingress) selects on.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: it-tools
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: it-tools
+  template:
+    metadata:
+      labels:
+        app: it-tools
+    spec:
+      containers:
+        - name: it-tools
+          image: corentinth/it-tools:latest
+          ports:
+            - containerPort: 80    # the app listens on 80 inside the pod

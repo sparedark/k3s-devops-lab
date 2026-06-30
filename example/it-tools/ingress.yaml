@@ -1,0 +1,21 @@
+# An Ingress — routes https://it-tools.<your-domain> to the Service.
+# k3-kube conventions:
+#   - ingressClassName: traefik  (k3s ships Traefik, NOT nginx)
+#   - NO tls: block — Cloudflare terminates TLS at the edge; in-cluster is plain HTTP
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: it-tools
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: it-tools.example.com      # <-- replace example.com with YOUR domain
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: it-tools
+                port:
+                  number: 80

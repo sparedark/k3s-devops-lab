@@ -1,0 +1,99 @@
+---
+# Install ArgoCD and register the app-of-apps root Application.
+- name: Ensure argocd namespace exists
+  ansible.builtin.shell: |
+    {{ kubectl }} create namespace argocd \
+      --dry-run=client -o yaml | {{ kubectl }} apply -f -
+  changed_when: false
+
+- name: Install ArgoCD manifests (server-side apply — the ApplicationSet CRD is too big for client-side)
+  ansible.builtin.shell: |
+    {{ kubectl }} apply --server-side --force-conflicts -n argocd -f \
+      https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+  register: argocd_apply
+  until: argocd_apply is succeeded
+  retries: 3
+  delay: 10
+  changed_when: "'configured' in argocd_apply.stdout or 'created' in argocd_apply.stdout or 'serverside-applied' in argocd_apply.stdout"
+
+- name: Wait for the ArgoCD server to be available
+  ansible.builtin.shell: |
+    {{ kubectl }} -n argocd rollout status deploy/argocd-server --timeout=300s
+  changed_when: false
+
+- name: Run argocd-server in insecure mode (TLS terminates at the Cloudflare edge)
+  ansible.builtin.shell: |
+    {{ kubectl }} -n argocd patch configmap argocd-cmd-params-cm --type merge \
+      -p '{"data":{"server.insecure":"true"}}'
+  changed_when: true
+
+- name: Restart argocd-server to apply insecure mode
+  ansible.builtin.shell: "{{ kubectl }} -n argocd rollout restart deploy/argocd-server"
+  changed_when: true
+
+- name: Wait for argocd-server to come back
+  ansible.builtin.shell: |
+    {{ kubectl }} -n argocd rollout status deploy/argocd-server --timeout=180s
+  changed_when: false
+
+- name: Render the ArgoCD ingress
+  ansible.builtin.template:
+    src: argocd-ingress.yaml.j2
+    dest: /tmp/argocd-ingress.yaml
+    mode: "0644"
+
+- name: Apply the ArgoCD ingress
+  ansible.builtin.shell: "{{ kubectl }} apply -f /tmp/argocd-ingress.yaml"
+  register: argocd_ing
+  changed_when: "'created' in argocd_ing.stdout or 'configured' in argocd_ing.stdout"
+
+- name: Ensure the monitoring namespace exists (Grafana's admin secret must be present before ArgoCD syncs Grafana)
+  ansible.builtin.shell: |
+    {{ kubectl }} create namespace monitoring \
+      --dry-run=client -o yaml | {{ kubectl }} apply -f -
+  changed_when: false
+
+# Strong, per-cluster Grafana password instead of the chart default "prom-operator".
+# Generated in-cluster so it never lands in the (public) Git repo. Idempotent: created
+# once and then left alone, so it stays stable across re-provisions. Harmless if
+# monitoring is disabled — it's just an unused secret.
+- name: Generate a random Grafana admin password (only when the secret is absent)
+  ansible.builtin.shell: |
+    if ! {{ kubectl }} -n monitoring get secret grafana-admin >/dev/null 2>&1; then
+      {{ kubectl }} -n monitoring create secret generic grafana-admin \
+        --from-literal=admin-user=admin \
+        --from-literal=admin-password="$(openssl rand -base64 24)"
+    fi
+  register: grafana_admin_secret
+  changed_when: "'created' in grafana_admin_secret.stdout"
+
+- name: Ensure the harbor namespace exists (Harbor's admin secret must be present before ArgoCD syncs Harbor)
+  ansible.builtin.shell: |
+    {{ kubectl }} create namespace harbor \
+      --dry-run=client -o yaml | {{ kubectl }} apply -f -
+  changed_when: false
+
+# Strong, per-cluster Harbor admin password instead of the chart default "Harbor12345".
+# Generated in-cluster so it never lands in the (public) Git repo. Idempotent: created
+# once and then left alone, so it stays stable across re-provisions. Harmless if
+# harbor is disabled — it's just an unused secret. Key name is the chart default
+# (existingSecretAdminPasswordKey: HARBOR_ADMIN_PASSWORD).
+- name: Generate a random Harbor admin password (only when the secret is absent)
+  ansible.builtin.shell: |
+    if ! {{ kubectl }} -n harbor get secret harbor-admin >/dev/null 2>&1; then
+      {{ kubectl }} -n harbor create secret generic harbor-admin \
+        --from-literal=HARBOR_ADMIN_PASSWORD="$(openssl rand -base64 24)"
+    fi
+  register: harbor_admin_secret
+  changed_when: "'created' in harbor_admin_secret.stdout"
+
+- name: Render the root app-of-apps Application
+  ansible.builtin.template:
+    src: root-app.yaml.j2
+    dest: /tmp/root-app.yaml
+    mode: "0644"
+
+- name: Apply the root Application
+  ansible.builtin.shell: "{{ kubectl }} apply -f /tmp/root-app.yaml"
+  register: root_apply
+  changed_when: "'created' in root_apply.stdout or 'configured' in root_apply.stdout"

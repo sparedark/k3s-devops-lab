@@ -1,0 +1,7 @@
+# These files run inside the Linux guest — force LF so bash/YAML don't choke on CRLF.
+*.sh        text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.j2        text eol=lf
+Vagrantfile text eol=lf
+.env.example text eol=lf

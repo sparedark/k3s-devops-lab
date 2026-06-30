@@ -1,0 +1,22 @@
+# The GitOps way: an ArgoCD Application that watches example/it-tools in YOUR fork
+# and keeps the cluster in sync with it. Apply this once; after that, just `git push`.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: it-tools
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/<you>/<your-fork>.git   # <-- your fork
+    targetRevision: main
+    path: example/it-tools                               # the folder above (kustomize)
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: it-tools
+  syncPolicy:
+    automated:
+      prune: true        # delete resources you remove from git
+      selfHeal: true     # revert manual cluster edits back to git
+    syncOptions:
+      - CreateNamespace=true

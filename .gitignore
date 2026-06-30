@@ -1,0 +1,10 @@
+# ── SECRETS: never commit the real env file ──
+.env
+
+# Vagrant / VMware
+.vagrant/
+*.log
+
+# Rendered kubeconfig pulled from the VM (if any)
+kubeconfig
+*.retry

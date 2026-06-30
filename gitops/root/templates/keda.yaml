@@ -1,0 +1,64 @@
+{{- if .Values.keda.enabled }}
+# KEDA (Kubernetes Event-Driven Autoscaler). Two Applications:
+#   1. `keda`      — the controller Helm chart (installs the ScaledObject CRDs)
+#   2. `keda-demo` — a self-contained Cron demo that scales nginx 0<->3
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: keda
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://kedacore.github.io/charts
+    chart: keda
+    # Exact pin — no auto-update. Bump manually after checking release notes.
+    targetRevision: "2.20.1"
+    helm:
+      values: |
+        # Keep the operator small — this is a lab box.
+        resources:
+          operator:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: keda
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+---
+# Demo workload + ScaledObject (plain manifests in this repo).
+# SkipDryRunOnMissingResource lets this app settle before KEDA's ScaledObject
+# CRD exists — ArgoCD skips schema pre-validation and retries until it's green.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: keda-demo
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: "{{ .Values.repoURL }}"
+    targetRevision: "{{ .Values.branch }}"
+    path: gitops/apps/keda-demo
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: keda-demo
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - SkipDryRunOnMissingResource=true
+{{- end }}

@@ -1,0 +1,47 @@
+{{- if .Values.harbor.enabled }}
+# Harbor container registry. Multi-component (core/registry/db/redis/jobservice)
+# — heavy, only enable on an 8GB VM (and ideally with Jenkins/Nexus off).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: harbor
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://helm.goharbor.io
+    chart: harbor
+    # Exact pin — no auto-update. Bump manually after checking release notes.
+    targetRevision: "1.19.1"
+    helm:
+      values: |
+        # TLS is terminated upstream (Cloudflare/Traefik), so Harbor serves
+        # plain HTTP behind the ingress but still emits https:// URLs.
+        externalURL: https://registry.{{ .Values.domain }}
+        # Random admin password from a secret Ansible pre-creates in-cluster,
+        # instead of the chart default "Harbor12345". Key defaults to
+        # HARBOR_ADMIN_PASSWORD. Never committed to the (public) Git repo.
+        existingSecretAdminPassword: harbor-admin
+        expose:
+          type: ingress
+          tls:
+            enabled: false
+          ingress:
+            className: traefik
+            hosts:
+              core: registry.{{ .Values.domain }}
+        # Trim the footprint: drop the Trivy vulnerability scanner.
+        trivy:
+          enabled: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: harbor
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+{{- end }}

@@ -1,0 +1,29 @@
+---
+# Bootstrap the lab foundation. Runs inside the guest via ansible_local.
+# Optional tools are NOT installed here — ArgoCD reconciles those from the
+# (public) Git repo, no token required.
+- name: Bootstrap k3s DevOps lab
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    kubeconfig: /etc/rancher/k3s/k3s.yaml
+    kubectl: "k3s kubectl --kubeconfig=/etc/rancher/k3s/k3s.yaml"
+    tunnel_name: k3-kube
+    # Supplied by Vagrant extra_vars: domain, cf_api_token, cf_account_id, git_repo, git_branch
+
+  pre_tasks:
+    - name: Assert required variables are present
+      ansible.builtin.assert:
+        that:
+          - domain | default('') | length > 0
+          - cf_api_token | default('') | length > 0
+          - cf_account_id | default('') | length > 0
+        fail_msg: "Missing required values (domain in values.yaml; CF_API_TOKEN/CF_ACCOUNT_ID in .env)."
+
+  roles:
+    - k3s
+    - cilium      # eBPF CNI + Hubble (no-op unless cilium_enabled); MUST precede argocd
+    - argocd
+    - cloudflared

@@ -1,0 +1,59 @@
+{{- if .Values.monitoring.enabled }}
+# Prometheus + Grafana via kube-prometheus-stack.
+# NOTE: chart version is pinned; if a sync fails with "chart not found", bump it.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: monitoring
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: kube-prometheus-stack
+    targetRevision: 65.1.1
+    helm:
+      values: |
+        grafana:
+          # Read the admin creds from a secret Ansible pre-creates with a random
+          # password, instead of the chart default "prom-operator". Keeps the
+          # credential out of this (public) repo.
+          admin:
+            existingSecret: grafana-admin
+            userKey: admin-user
+            passwordKey: admin-password
+          ingress:
+            enabled: true
+            ingressClassName: traefik
+            hosts:
+              - grafana.{{ .Values.domain }}
+        {{- if .Values.loki.enabled }}
+          # Loki lives in the `logging` namespace (loki-stack release name = "loki").
+          # Provisioned at Grafana boot so log queries work without manual setup.
+          additionalDataSources:
+            - name: Loki
+              type: loki
+              uid: loki
+              url: http://loki.logging.svc.cluster.local:3100
+              access: proxy
+              isDefault: false
+        {{- end }}
+        prometheus:
+          prometheusSpec:
+            retention: 6h
+            resources:
+              requests:
+                memory: 400Mi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+{{- end }}

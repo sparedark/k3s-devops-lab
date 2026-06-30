@@ -1,0 +1,65 @@
+{{- if .Values.nexus.enabled }}
+# Nexus Repository Manager. JVM-heavy — only enable on an 8GB VM.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: nexus
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://sonatype.github.io/helm3-charts/
+    chart: nexus-repository-manager
+    # Exact pin — no auto-update. Bump manually after checking release notes.
+    # 64.2.0 is the newest published chart (Sonatype's helm3-charts repo lags
+    # the product; its appVersion is stuck at 3.64.0).
+    targetRevision: "64.2.0"
+    helm:
+      values: |
+        # The chart's default Nexus binary (3.64.0) is BELOW 3.68.1 and still
+        # vulnerable to CVE-2024-4956, so we pin a patched image explicitly.
+        # Bump manually; the chart won't track new Nexus releases for us.
+        image:
+          tag: "3.93.2"
+        # IMPORTANT: resources, env and securityContext live UNDER `nexus:` in
+        # this chart — a top-level `resources:` block is silently ignored.
+        nexus:
+          # Override the chart's default JVM params. The default includes
+          # `-XX:+UseCGroupMemoryLimitForHeap`, a JDK 8/9/10-only flag that was
+          # REMOVED in JDK 11 — the patched 3.93.2 image ships a modern JDK and
+          # the unrecognized flag aborts JVM startup (CrashLoopBackOff, exit 1).
+          # JDK 11+ is container-aware by default, so we drop the flag and set
+          # an explicit heap that fits the limit below.
+          env:
+            - name: INSTALL4J_ADD_VM_PARAMS
+              value: |-
+                -Xms1200M -Xmx1200M
+                -XX:MaxDirectMemorySize=1200M
+                -Djava.util.prefs.userRoot=/nexus-data/javaprefs
+            # Keep the chart's random-admin-password behaviour (overriding
+            # `env` replaces the whole list, so this must be repeated here).
+            - name: NEXUS_SECURITY_RANDOMPASSWORD
+              value: "true"
+          resources:
+            requests:
+              cpu: 500m
+              memory: 2Gi
+            limits:
+              memory: 3Gi
+        ingress:
+          enabled: true
+          ingressClassName: traefik
+          hostPath: /
+          hostRepo: nexus.{{ .Values.domain }}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: nexus
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+{{- end }}

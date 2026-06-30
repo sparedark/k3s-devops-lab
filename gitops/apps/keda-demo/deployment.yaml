@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keda-demo
+  namespace: keda-demo
+  labels:
+    app: keda-demo
+spec:
+  # NOTE: `replicas` is intentionally omitted. KEDA generates an HPA that owns
+  # this field; pinning it here would fight the autoscaler (constant thrash).
+  selector:
+    matchLabels:
+      app: keda-demo
+  template:
+    metadata:
+      labels:
+        app: keda-demo
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.27-alpine
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 32Mi

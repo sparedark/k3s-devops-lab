@@ -1,0 +1,57 @@
+{{- if .Values.knative.enabled }}
+# Knative Serving — request-driven scale-to-zero for HTTP services (self-hosted
+# Cloud Run), using the lightweight Kourier networking layer. Two Applications:
+#   1. knative-operator — the operator + CRDs (Helm)
+#   2. knative-serving   — a KnativeServing CR the operator reconciles
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: knative-operator
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://knative.github.io/operator
+    chart: knative-operator
+    # Exact pin (note the leading 'v' — Knative charts are versioned vX.Y.Z).
+    targetRevision: "v1.22.2"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: knative-operator
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+---
+# The KnativeServing CR (plain manifest in this repo). Its kind only exists after
+# the operator installs the CRD, so SkipDryRunOnMissingResource lets ArgoCD
+# settle and retry until the operator is up (same pattern as keda-demo).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: knative-serving
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: "{{ .Values.repoURL }}"
+    targetRevision: "{{ .Values.branch }}"
+    path: gitops/apps/knative-serving
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: knative-serving
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - SkipDryRunOnMissingResource=true
+{{- end }}

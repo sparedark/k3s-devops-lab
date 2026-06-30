@@ -1,0 +1,40 @@
+{{- if .Values.jenkins.enabled }}
+# Jenkins CI. JVM-heavy — only enable on an 8GB VM.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: jenkins
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://charts.jenkins.io
+    chart: jenkins
+    # Exact pin — no auto-update. Bump manually (newer chart = newer Jenkins
+    # core + a plugin set tested against it, so move chart and plugins together).
+    targetRevision: "5.9.29"
+    helm:
+      values: |
+        controller:
+          ingress:
+            enabled: true
+            ingressClassName: traefik
+            hostName: jenkins.{{ .Values.domain }}
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              memory: 2Gi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: jenkins
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+{{- end }}

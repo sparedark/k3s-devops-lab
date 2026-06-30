@@ -1,0 +1,30 @@
+{{- if and .Values.keda.enabled .Values.kedaHttp.enabled }}
+# KEDA HTTP Add-on — scale HTTP workloads to zero (Cloud Run style) via an
+# interceptor proxy that buffers the request and cold-starts the pod.
+# Guarded on keda.enabled too: the add-on is useless without KEDA core, so it
+# only installs when BOTH flags are true. Introduces the HTTPScaledObject CRD.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: keda-http
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://kedacore.github.io/charts
+    chart: keda-add-ons-http
+    # Exact pin — bump manually after checking release notes.
+    targetRevision: "0.15.0"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: keda          # lives alongside KEDA core
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+{{- end }}

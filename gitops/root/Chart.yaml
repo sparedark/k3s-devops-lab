@@ -1,0 +1,5 @@
+apiVersion: v2
+name: k3-kube-root
+description: App-of-apps that toggles DevOps tools based on .env-rendered flags.
+type: application
+version: 0.1.0

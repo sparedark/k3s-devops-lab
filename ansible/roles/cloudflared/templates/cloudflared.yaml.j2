@@ -1,0 +1,69 @@
+# cloudflared config + deployment. Forwards ALL tunnel traffic to Traefik,
+# which routes to the right service by Host header (e.g. grafana.{{ domain }}).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cloudflared-config
+  namespace: cloudflared
+data:
+  config.yaml: |
+    tunnel: {{ tunnel_id }}
+    credentials-file: /etc/cloudflared/creds/credentials.json
+    no-autoupdate: true
+    ingress:
+      - service: http://traefik.kube-system.svc.cluster.local:80
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudflared
+  namespace: cloudflared
+  labels:
+    app: cloudflared
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cloudflared
+  template:
+    metadata:
+      labels:
+        app: cloudflared
+    spec:
+      containers:
+        - name: cloudflared
+          image: cloudflare/cloudflared:latest
+          args:
+            - tunnel
+            - --metrics
+            - 0.0.0.0:2000      # pin metrics/health port so the liveness probe matches
+            - --config
+            - /etc/cloudflared/config/config.yaml
+            - run
+          livenessProbe:
+            httpGet:
+              path: /ready
+              port: 2000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/cloudflared/config
+              readOnly: true
+            - name: creds
+              mountPath: /etc/cloudflared/creds
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: cloudflared-config
+        - name: creds
+          secret:
+            secretName: cloudflared-creds

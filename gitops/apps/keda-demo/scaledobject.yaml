@@ -1,0 +1,21 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: keda-demo
+  namespace: keda-demo
+spec:
+  scaleTargetRef:
+    name: keda-demo            # the Deployment above
+  minReplicaCount: 0           # scale to ZERO when idle (KEDA's headline feature)
+  maxReplicaCount: 3
+  cooldownPeriod: 60           # seconds idle before scaling back down — short, so it's quick to watch
+  triggers:
+    - type: cron
+      metadata:
+        timezone: UTC
+        # Scale up to `desiredReplicas` for 5 minutes, every 10 minutes,
+        # then KEDA scales back to 0. Watch it oscillate with:
+        #   kubectl get scaledobject,hpa,deploy -n keda-demo -w
+        start: "0,10,20,30,40,50 * * * *"
+        end: "5,15,25,35,45,55 * * * *"
+        desiredReplicas: "3"

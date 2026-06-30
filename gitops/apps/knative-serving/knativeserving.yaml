@@ -1,0 +1,15 @@
+# Tells the Knative Operator to install Knative Serving with Kourier as the
+# ingress (lightweight Envoy — no Istio/service-mesh needed on a single node).
+apiVersion: operator.knative.dev/v1beta1
+kind: KnativeServing
+metadata:
+  name: knative-serving
+  namespace: knative-serving
+spec:
+  version: "1.22.1"
+  ingress:
+    kourier:
+      enabled: true
+  config:
+    network:
+      ingress-class: "kourier.ingress.networking.knative.dev"
