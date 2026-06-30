@@ -4,10 +4,10 @@
 # └─────────────────────────────────────────────────────────────────────────┘
 
 # Your Cloudflare domain. Tools are exposed at <tool>.<domain>.
-domain: your domain
+domain: xeze.org
 
 # This repo (ArgoCD pulls manifests from here).
-repoURL: your github repo 
+repoURL: https://github.com/sparedark/k3s-devops-lab.git 
 branch: main
 
 # Tool toggles:  true = ArgoCD installs it,  false = ArgoCD prunes it.
@@ -17,15 +17,15 @@ monitoring:
 loki:
   enabled: false      # Loki logs (shown in Grafana)
 jenkins:
-  enabled: false     # heavy: +2GB
+  enabled: true     # heavy: +2GB
 nexus:
-  enabled: false     # heavy: +2GB
+  enabled: true     # heavy: +2GB
 harbor:
   enabled: false    # container registry at registry.<domain> — heavy: +2GB
 keda:
-  enabled: false     # event-driven autoscaler + a self-contained Cron demo — light: +512MB
+  enabled: true     # event-driven autoscaler + a self-contained Cron demo — light: +512MB
 kedaHttp:
-  enabled: false     # KEDA HTTP Add-on: scale HTTP apps to zero (Cloud Run style).
+  enabled: true     # KEDA HTTP Add-on: scale HTTP apps to zero (Cloud Run style).
                     # REQUIRES keda.enabled=true. Light: +256MB. See docs/keda.md.
 knative:
   enabled: false    # Knative Serving + Kourier: self-hosted Cloud Run (request-driven
@@ -37,4 +37,4 @@ knative:
 # false = stock K3s (Flannel + kube-proxy).
 # You CANNOT hot-swap a CNI: changing this needs `vagrant destroy && vagrant up`.
 cilium:
-  enabled: false     # eBPF datapath + Hubble observability — +768MB
+  enabled: true     # eBPF datapath + Hubble observability — +768MB
