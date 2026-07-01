@@ -19,7 +19,7 @@ loki:
 jenkins:
   enabled: true     # heavy: +2GB
 nexus:
-  enabled: true     # heavy: +2GB
+  enabled: false     # heavy: +2GB
 harbor:
   enabled: false    # container registry at registry.<domain> — heavy: +2GB
 keda:
